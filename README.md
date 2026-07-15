@@ -19,6 +19,14 @@ Licensed AGPL-3.0.
 
 ---
 
+## Architecture
+
+See [`docs/architecture.md`](docs/architecture.md) for container and
+request-flow diagrams (Mermaid) covering the scrape, crawl, monitor,
+and maintenance flows.
+
+---
+
 ## Install
 
 ```bash

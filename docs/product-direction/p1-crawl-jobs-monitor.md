@@ -15,14 +15,14 @@ not here. See `ROADMAP.md` for current phase status.
 ## Goal
 
 Turn single-page scraping (P0) into multi-page crawling, with async job
-tracking so a caller (Chatgrow) can fire off a crawl and get notified when
+tracking so a caller can fire off a crawl and get notified when
 it's done — without polling, without duplicate pages, without a crawl that
 silently runs forever. On top of that, let a crawl be saved as a recurring
 **monitor** that re-checks a site on a schedule and reports what changed,
-so Chatgrow's agent context can stay current without manual re-crawling.
+so the caller's agent context can stay current without manual re-crawling.
 
-**Definition of done:** point `/crawl` at a real client site Chatgrow
-serves today, get back clean markdown for every reachable page under the
+**Definition of done:** point `/crawl` at a real client site served today,
+get back clean markdown for every reachable page under the
 configured cap, receive a webhook when it finishes, with zero duplicate
 pages scraped and zero crawls that exceed their bounds. Additionally: save
 that crawl as a monitor, have it auto re-run on schedule, and get a
@@ -188,9 +188,9 @@ exists, rather than building LLM integration twice. Until then, P1's
 monitor is usable but noisier than the long-term version.
 
 **Deliberately not included here:** re-embedding/re-indexing the changed
-content into Chatgrow's RAG store. That's Chatgrow's responsibility on
+content into the caller's RAG store. That's the caller's responsibility on
 receiving the webhook, not this service's — keeps the scraper from
-needing to know anything about Chatgrow's vector store or embedding
+needing to know anything about the caller's vector store or embedding
 pipeline.
 
 ---
@@ -205,11 +205,11 @@ pipeline.
   plain fetch worker.
 - Browser worker enabled by default — fetch worker only unless a page is
   flagged as JS-rendered.
-- Re-embedding/re-indexing changed content into Chatgrow's RAG store —
-  the monitor reports *what* changed, Chatgrow decides what to do with
+- Re-embedding/re-indexing changed content into the caller's RAG store —
+  the monitor reports *what* changed, the caller decides what to do with
   that.
 - Auth on the crawl API — fine for now since it's internal-network-only
-  between Chatgrow and the scraper service.
+  between the caller and the scraper service.
 
 ---
 
@@ -239,7 +239,7 @@ whole crawl.
 
 **Per-page failure type → adopt the enum, no flat boolean.**
 Each page result gets `status: scraped | not_found | blocked | timeout |
-error`. Cheap to add now, and means Chatgrow can later decide to treat
+error`. Cheap to add now, and means the caller can later decide to treat
 `blocked` differently from `not_found` (e.g. retry blocked pages with a
 different strategy later) without a schema change.
 

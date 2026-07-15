@@ -39,7 +39,7 @@ webhook while relevant ones (pricing change, new product) do.
 
 Config-driven via `.env`. Two provider paths — OpenAI-compatible (covers
 most providers, including self-hosted) and Anthropic (different API format,
-worth supporting natively given Chatgrow's stack).
+worth supporting natively).
 
 ```bash
 # OpenAI-compatible — works for OpenAI, Groq, Together, Mistral, LM Studio,
@@ -190,7 +190,7 @@ fire the webhook.
 - Caching extraction results — the page content changes; caching adds
   invalidation complexity with unclear benefit at this scale.
 - Nested/complex schema types beyond the four supported type hints —
-  flat schemas cover the practical cases Chatgrow needs today.
+  flat schemas cover the practical cases needed today.
 - Streaming responses from `/extract` — latency isn't a problem at one
   URL at a time.
 - Fine-tuning or model management — providers handle this.

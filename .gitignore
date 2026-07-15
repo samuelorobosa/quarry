@@ -3,6 +3,10 @@
 /node_modules
 /build
 
+# local-only planning docs, not for the public repo
+/ROADMAP.md
+/AGENTS.md
+
 # Logs
 logs
 *.log
