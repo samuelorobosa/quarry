@@ -27,7 +27,9 @@ export class JobsController {
     };
 
     const fmt = (d: Date | null) =>
-      d ? new Date(d).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '—';
+      d
+        ? new Date(d).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+        : '—';
 
     const tableRows = rows
       .map(

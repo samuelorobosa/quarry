@@ -13,7 +13,18 @@ import { ScrapeModule } from './scrape/scrape.module.js';
 import { WebhookModule } from './webhooks/webhook.module.js';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ScrapeModule, CrawlModule, JobsModule, MonitorsModule, WebhookModule, LlmModule, ExtractModule, MetricsModule, DashboardModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    ScrapeModule,
+    CrawlModule,
+    JobsModule,
+    MonitorsModule,
+    WebhookModule,
+    LlmModule,
+    ExtractModule,
+    MetricsModule,
+    DashboardModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

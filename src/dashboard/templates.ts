@@ -1,3 +1,36 @@
+import type {
+  jobs,
+  job_pages,
+  monitors,
+  scrape_requests,
+} from '../db/schema.js';
+
+type Job = typeof jobs.$inferSelect;
+type JobPage = typeof job_pages.$inferSelect;
+type Monitor = typeof monitors.$inferSelect;
+type ScrapeRequest = typeof scrape_requests.$inferSelect;
+
+interface ScrapeStats {
+  total: number;
+  today: number;
+  total24: number;
+  avgMs: number | null;
+  successRate: number;
+  engines: Record<string, number>;
+}
+
+interface JobSummary {
+  'job-id': string;
+  status: string;
+  url: string;
+  'pages-discovered': number;
+  'pages-scraped': number;
+  'pages-failed': number;
+  error: string | null;
+}
+
+type QueueCounts = Record<string, number>;
+
 // ── Shared styles ─────────────────────────────────────────────────────────────
 function css(): string {
   return `
@@ -331,7 +364,13 @@ function css(): string {
 export function layout(opts: {
   title: string;
   active: string;
-  status: { api: boolean; db: boolean; redis: boolean; workers: number; browser: boolean };
+  status: {
+    api: boolean;
+    db: boolean;
+    redis: boolean;
+    workers: number;
+    browser: boolean;
+  };
   content: string;
   head?: string;
 }): string {
@@ -375,17 +414,26 @@ export function layout(opts: {
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
-export function overviewPage(stats: any, recentScrapes: any[], recentJobs: any[]): string {
-  const fmt = (d: Date | null) => d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
-  const dur = (ms: number | null) => ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+export function overviewPage(
+  stats: ScrapeStats,
+  recentScrapes: ScrapeRequest[],
+  recentJobs: Job[],
+): string {
+  const fmt = (d: Date | null) =>
+    d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
+  const dur = (ms: number | null) =>
+    ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
   const runningJobs = recentJobs.filter((j) => j.status === 'running');
 
   const engineFetch = stats.engines?.fetch ?? 0;
   const engineBrowser = stats.engines?.browser ?? 0;
   const engineTotal = engineFetch + engineBrowser;
-  const browserPct = engineTotal > 0 ? Math.round((engineBrowser / engineTotal) * 100) : 0;
+  const browserPct =
+    engineTotal > 0 ? Math.round((engineBrowser / engineTotal) * 100) : 0;
 
-  const scrapeRows = recentScrapes.map((r) => `
+  const scrapeRows = recentScrapes
+    .map(
+      (r) => `
     <tr>
       <td><div class="cell-url" title="${r.url}">${r.url}</div></td>
       <td><span class="badge badge-${r.source === 'extract' ? 'blue' : 'queued'}">${r.source}</span></td>
@@ -393,11 +441,18 @@ export function overviewPage(stats: any, recentScrapes: any[], recentJobs: any[]
       <td style="color:var(--muted);font-size:11px">${dur(r.duration_ms)}</td>
       <td><span class="badge badge-${r.status === 'ok' ? 'completed' : 'failed'}">${r.status}</span></td>
       <td style="color:var(--muted);font-size:11px">${fmt(r.created_at)}</td>
-    </tr>`).join('');
+    </tr>`,
+    )
+    .join('');
 
-  const jobRows = recentJobs.slice(0, 8).map((j) => {
-    const pct = j.pages_discovered > 0 ? Math.round((j.pages_scraped / j.pages_discovered) * 100) : 0;
-    return `
+  const jobRows = recentJobs
+    .slice(0, 8)
+    .map((j) => {
+      const pct =
+        j.pages_discovered > 0
+          ? Math.round((j.pages_scraped / j.pages_discovered) * 100)
+          : 0;
+      return `
     <tr>
       <td><a class="cell-id" href="/dashboard/jobs/${j.id}">${j.id}</a></td>
       <td><span class="badge badge-${j.status}">${j.status}</span></td>
@@ -410,7 +465,8 @@ export function overviewPage(stats: any, recentScrapes: any[], recentJobs: any[]
       </td>
       <td style="color:var(--muted);font-size:11px">${fmt(j.created_at)}</td>
     </tr>`;
-  }).join('');
+    })
+    .join('');
 
   return `
     <div class="page-header">
@@ -455,15 +511,21 @@ export function overviewPage(stats: any, recentScrapes: any[], recentJobs: any[]
       </div>
     </section>
 
-    ${runningJobs.length > 0 ? `
+    ${
+      runningJobs.length > 0
+        ? `
     <section>
       <div class="section-label">
         <span class="dot dot-blue" style="display:inline-block"></span>
         live crawls
       </div>
-      ${runningJobs.map((j) => {
-        const pct = j.pages_discovered > 0 ? Math.round((j.pages_scraped / j.pages_discovered) * 100) : 0;
-        return `
+      ${runningJobs
+        .map((j) => {
+          const pct =
+            j.pages_discovered > 0
+              ? Math.round((j.pages_scraped / j.pages_discovered) * 100)
+              : 0;
+          return `
         <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:8px;padding:16px 20px;margin-bottom:10px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center">
           <div>
             <div style="font-size:11px;color:var(--cyan);margin-bottom:4px"><a href="/dashboard/jobs/${j.id}">${j.id}</a></div>
@@ -476,8 +538,11 @@ export function overviewPage(stats: any, recentScrapes: any[], recentJobs: any[]
           </div>
           <a href="/dashboard/jobs/${j.id}" class="btn btn-primary">view log →</a>
         </div>`;
-      }).join('')}
-    </section>` : ''}
+        })
+        .join('')}
+    </section>`
+        : ''
+    }
 
     <section>
       <div class="section-label">recent crawl jobs <a href="/dashboard/jobs" style="font-size:10px;margin-left:auto;text-transform:none;letter-spacing:0">view all →</a></div>
@@ -495,11 +560,19 @@ export function overviewPage(stats: any, recentScrapes: any[], recentJobs: any[]
 }
 
 // ── Scrapes list ──────────────────────────────────────────────────────────────
-export function scrapesPage(rows: any[], sourceFilter: string, engineFilter: string): string {
-  const fmt = (d: Date | null) => d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
-  const dur = (ms: number | null) => ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+export function scrapesPage(
+  rows: ScrapeRequest[],
+  sourceFilter: string,
+  engineFilter: string,
+): string {
+  const fmt = (d: Date | null) =>
+    d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
+  const dur = (ms: number | null) =>
+    ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 
-  const tableRows = rows.map((r) => `
+  const tableRows = rows
+    .map(
+      (r) => `
     <tr>
       <td><div class="cell-url" title="${r.url}">${r.url}</div></td>
       <td><span class="badge badge-${r.source === 'extract' ? 'blue' : 'queued'}">${r.source}</span></td>
@@ -509,7 +582,9 @@ export function scrapesPage(rows: any[], sourceFilter: string, engineFilter: str
       <td><span class="badge badge-${r.status === 'ok' ? 'completed' : 'failed'}">${r.status}</span></td>
       <td style="color:var(--muted);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.error ?? ''}">${r.error ?? '—'}</td>
       <td style="color:var(--muted);font-size:11px">${fmt(r.created_at)}</td>
-    </tr>`).join('');
+    </tr>`,
+    )
+    .join('');
 
   const sourceFilters = [
     { v: 'all', label: 'all' },
@@ -556,12 +631,18 @@ export function scrapesPage(rows: any[], sourceFilter: string, engineFilter: str
 }
 
 // ── Jobs list ─────────────────────────────────────────────────────────────────
-export function jobsPage(jobs: any[], filter: string, hasRunning: boolean): string {
+export function jobsPage(jobList: Job[], filter: string): string {
   const filters = ['all', 'queued', 'running', 'completed', 'failed'];
-  const fmt = (d: Date | null) => d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
-  const pct = (j: any) => j.pages_discovered > 0 ? Math.round((j.pages_scraped / j.pages_discovered) * 100) : 0;
+  const fmt = (d: Date | null) =>
+    d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
+  const pct = (j: Job) =>
+    j.pages_discovered > 0
+      ? Math.round((j.pages_scraped / j.pages_discovered) * 100)
+      : 0;
 
-  const rows = jobs.map((j) => `
+  const rows = jobList
+    .map(
+      (j) => `
     <tr>
       <td><a class="cell-id" href="/dashboard/jobs/${j.id}">${j.id}</a></td>
       <td><span class="badge badge-${j.status}">${j.status}</span></td>
@@ -574,12 +655,14 @@ export function jobsPage(jobs: any[], filter: string, hasRunning: boolean): stri
       </td>
       <td style="color:${j.pages_failed > 0 ? 'var(--red)' : 'var(--dim)'}">${j.pages_failed}</td>
       <td style="color:var(--muted);font-size:11px">${fmt(j.started_at)}</td>
-    </tr>`).join('');
+    </tr>`,
+    )
+    .join('');
 
   return `
     <div class="page-header">
       <span class="page-title">jobs</span>
-      <span class="page-sub">${jobs.length} result${jobs.length !== 1 ? 's' : ''}</span>
+      <span class="page-sub">${jobList.length} result${jobList.length !== 1 ? 's' : ''}</span>
     </div>
 
     <div class="filters">
@@ -602,19 +685,24 @@ export function jobsPage(jobs: any[], filter: string, hasRunning: boolean): stri
 }
 
 // ── Job detail ────────────────────────────────────────────────────────────────
-export function jobDetailPage(job: any, pages: any[]): string {
-  const fmt = (d: Date | null) => d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
-  const dur = (ms: number | null) => ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
-  const chars = (n: number | null) => n == null ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+export function jobDetailPage(job: JobSummary, pages: JobPage[]): string {
+  const fmt = (d: Date | null) =>
+    d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
+  const dur = (ms: number | null) =>
+    ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  const chars = (n: number | null) =>
+    n == null ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
   const isRunning = job.status === 'running';
-  const pct = job['pages-discovered'] > 0
-    ? Math.round((job['pages-scraped'] / job['pages-discovered']) * 100)
-    : 0;
+  const pct =
+    job['pages-discovered'] > 0
+      ? Math.round((job['pages-scraped'] / job['pages-discovered']) * 100)
+      : 0;
 
-  const rows = pages.map((p, i) => {
-    const isNew = isRunning && i >= pages.length - 3;
-    return `
+  const rows = pages
+    .map((p, i) => {
+      const isNew = isRunning && i >= pages.length - 3;
+      return `
     <tr${isNew ? ' style="background:rgba(96,165,250,0.04)"' : ''}>
       <td style="color:var(--dim);font-size:10px;width:32px;text-align:right;padding-right:8px">${i + 1}</td>
       <td><span class="badge badge-${p.status}">${p.status}</span></td>
@@ -625,12 +713,16 @@ export function jobDetailPage(job: any, pages: any[]): string {
       <td style="color:var(--muted);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.title ?? ''}">${p.title ?? p.error ?? '—'}</td>
       <td style="color:var(--dim);font-size:10px;white-space:nowrap">${fmt(p.scraped_at)}</td>
     </tr>`;
-  }).join('');
+    })
+    .join('');
 
   const timedPages = pages.filter((p) => p.duration_ms != null);
-  const avgDuration = timedPages.length > 0
-    ? Math.round(timedPages.reduce((s, p) => s + p.duration_ms, 0) / timedPages.length)
-    : null;
+  const avgDuration =
+    timedPages.length > 0
+      ? Math.round(
+          timedPages.reduce((s, p) => s + p.duration_ms, 0) / timedPages.length,
+        )
+      : null;
 
   return `
     <a class="back" href="/dashboard/jobs">← jobs</a>
@@ -686,17 +778,24 @@ export function jobDetailPage(job: any, pages: any[]): string {
       </div>
     </section>
 
-    ${isRunning ? `<script>
+    ${
+      isRunning
+        ? `<script>
       const wrap = document.getElementById('log-wrap');
       if (wrap) wrap.scrollTop = wrap.scrollHeight;
-    </script>` : ''}`;
+    </script>`
+        : ''
+    }`;
 }
 
 // ── Monitors ──────────────────────────────────────────────────────────────────
-export function monitorsPage(monitors: any[]): string {
-  const fmt = (d: Date | null) => d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
+export function monitorsPage(monitorList: Monitor[]): string {
+  const fmt = (d: Date | null) =>
+    d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '—';
 
-  const rows = monitors.map((m) => `
+  const rows = monitorList
+    .map(
+      (m) => `
     <tr>
       <td><span class="cell-id">${m.id}</span></td>
       <td><span class="badge badge-${m.status}">${m.status}</span></td>
@@ -706,26 +805,36 @@ export function monitorsPage(monitors: any[]): string {
       <td style="color:var(--muted);font-size:11px">${fmt(m.last_checked_at)}</td>
       <td>
         <div class="actions">
-          ${m.status === 'active' ? `
+          ${
+            m.status === 'active'
+              ? `
             <form method="POST" action="/dashboard/monitors/${m.id}/pause">
               <button class="btn btn-danger" type="submit">pause</button>
-            </form>` : ''}
-          ${m.status === 'paused' ? `
+            </form>`
+              : ''
+          }
+          ${
+            m.status === 'paused'
+              ? `
             <form method="POST" action="/dashboard/monitors/${m.id}/resume">
               <button class="btn btn-success" type="submit">resume</button>
-            </form>` : ''}
+            </form>`
+              : ''
+          }
           ${m.last_job_id ? `<a class="btn" href="/dashboard/jobs/${m.last_job_id}">last run</a>` : ''}
           <form method="POST" action="/dashboard/monitors/${m.id}/delete" onsubmit="return confirm('Delete monitor ${m.id}?')">
             <button class="btn btn-danger" type="submit">delete</button>
           </form>
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`,
+    )
+    .join('');
 
   return `
     <div class="page-header">
       <span class="page-title">monitors</span>
-      <span class="page-sub">${monitors.length} total</span>
+      <span class="page-sub">${monitorList.length} total</span>
     </div>
 
     <div class="table-wrap">
@@ -744,8 +853,8 @@ export function monitorsPage(monitors: any[]): string {
 }
 
 // ── Workers ───────────────────────────────────────────────────────────────────
-export function workersPage(crawl: any, monitor: any): string {
-  const qCard = (name: string, counts: any) => `
+export function workersPage(crawl: QueueCounts, monitor: QueueCounts): string {
+  const qCard = (name: string, counts: QueueCounts) => `
     <div class="queue-card">
       <div class="queue-name">
         <span class="dot ${counts.active > 0 ? 'dot-blue' : 'dot-gray'}"></span>

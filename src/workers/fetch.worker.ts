@@ -11,20 +11,35 @@ import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
 import robotsParser from 'robots-parser';
 import { diffLines } from 'diff';
+import { errorMessage } from '../common/error-message.js';
 import * as schema from '../db/schema.js';
 import { llmComplete, tryParseJson } from '../llm/llm-complete.js';
 import { browserScrape } from '../scrape/browser-scrape.js';
+import {
+  normalizeUrl,
+  isAllowedByPatterns,
+  isSameDomain,
+} from './url-helpers.js';
 
-const { jobs, job_pages, monitors, monitor_pages, monitor_checks, monitor_changes, logs } = schema;
+const {
+  jobs,
+  job_pages,
+  monitors,
+  monitor_pages,
+  monitor_checks,
+  monitor_changes,
+  logs,
+} = schema;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/quarry';
+const DATABASE_URL =
+  process.env.DATABASE_URL ??
+  'postgresql://postgres:postgres@localhost:5432/quarry';
 const POLITENESS_MS = parseInt(process.env.POLITENESS_MS ?? '300', 10);
 const FETCH_TIMEOUT_MS = 15_000;
 const SITEMAP_TIMEOUT_MS = 30_000;
 const USER_AGENT = 'Quarry/0.1 (web scraper)';
-const WEBHOOK_URL_API = process.env.API_URL ?? 'http://localhost:3000';
 const LOG_RETENTION_DAYS = parseInt(process.env.LOG_RETENTION_DAYS ?? '30', 10);
 
 // ── Connections ───────────────────────────────────────────────────────────────
@@ -35,59 +50,19 @@ const bullConnection = { url: REDIS_URL };
 const pool = new Pool({ connectionString: DATABASE_URL });
 const db = drizzle(pool, { schema });
 const crawlQueue = new Queue('crawl', { connection: bullConnection });
-const monitorQueue = new Queue('monitor', { connection: bullConnection });
-const maintenanceQueue = new Queue('maintenance', { connection: bullConnection });
+const maintenanceQueue = new Queue('maintenance', {
+  connection: bullConnection,
+});
 
 // ── Shared tooling ────────────────────────────────────────────────────────────
-const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+});
 const domainTimings = new Map<string, number>();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function normalizeUrl(href: string, base: string): string | null {
-  try {
-    const u = new URL(href, base);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    u.hash = '';
-    u.search = [...u.searchParams.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .reduce((sp, [k, v]) => { sp.set(k, v); return sp; }, new URLSearchParams())
-      .toString();
-    if (u.search) u.search = '?' + u.search; else u.search = '';
-    let path = u.pathname;
-    if (path.endsWith('/') && path.length > 1) path = path.slice(0, -1);
-    u.pathname = path;
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
-
-function matchesPattern(pathname: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '.*');
-  return new RegExp(`^${re}$`).test(pathname);
-}
-
-function isAllowedByPatterns(url: string, include: string[], exclude: string[]): boolean {
-  try {
-    const { pathname } = new URL(url);
-    if (exclude.length > 0 && exclude.some((p) => matchesPattern(pathname, p))) return false;
-    if (include.length > 0 && !include.some((p) => matchesPattern(pathname, p))) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isSameDomain(urlA: string, urlB: string): boolean {
-  try {
-    return new URL(urlA).hostname === new URL(urlB).hostname;
-  } catch {
-    return false;
-  }
-}
 
 async function enforcePoliteness(url: string): Promise<void> {
   const domain = new URL(url).hostname;
@@ -97,7 +72,9 @@ async function enforcePoliteness(url: string): Promise<void> {
   domainTimings.set(domain, Date.now());
 }
 
-async function fetchRobots(siteUrl: string): Promise<ReturnType<typeof robotsParser>> {
+async function fetchRobots(
+  siteUrl: string,
+): Promise<ReturnType<typeof robotsParser>> {
   const robotsUrl = new URL('/robots.txt', siteUrl).toString();
   try {
     const res = await fetch(robotsUrl, {
@@ -121,18 +98,26 @@ type FetchedPage = {
   lastModified?: string;
 };
 
-async function fetchPage(url: string, conditionalHeaders?: { etag?: string | null; lastModified?: string | null }): Promise<FetchedPage & { unchanged?: boolean }> {
+async function fetchPage(
+  url: string,
+  conditionalHeaders?: { etag?: string | null; lastModified?: string | null },
+): Promise<FetchedPage & { unchanged?: boolean }> {
   await enforcePoliteness(url);
 
   const headers: Record<string, string> = { 'User-Agent': USER_AGENT };
-  if (conditionalHeaders?.etag) headers['If-None-Match'] = conditionalHeaders.etag;
-  if (conditionalHeaders?.lastModified) headers['If-Modified-Since'] = conditionalHeaders.lastModified;
+  if (conditionalHeaders?.etag)
+    headers['If-None-Match'] = conditionalHeaders.etag;
+  if (conditionalHeaders?.lastModified)
+    headers['If-Modified-Since'] = conditionalHeaders.lastModified;
 
   let res: Response;
   try {
-    res = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (msg.includes('TimeoutError') || msg.includes('abort')) {
       return { status: 'timeout', error: 'Request timed out' };
     }
@@ -141,7 +126,8 @@ async function fetchPage(url: string, conditionalHeaders?: { etag?: string | nul
 
   if (res.status === 304) return { status: 'scraped', unchanged: true };
   if (res.status === 404) return { status: 'not_found', error: 'HTTP 404' };
-  if (res.status === 403 || res.status === 429) return { status: 'blocked', error: `HTTP ${res.status}` };
+  if (res.status === 403 || res.status === 429)
+    return { status: 'blocked', error: `HTTP ${res.status}` };
   if (!res.ok) return { status: 'error', error: `HTTP ${res.status}` };
 
   const html = await res.text();
@@ -169,7 +155,9 @@ async function fetchPage(url: string, conditionalHeaders?: { etag?: string | nul
         etag: res.headers.get('etag') ?? undefined,
         lastModified: res.headers.get('last-modified') ?? undefined,
       };
-    } catch { /* fall through to fetch result */ }
+    } catch {
+      /* fall through to fetch result */
+    }
   }
 
   return {
@@ -187,6 +175,21 @@ interface FrontierItem {
   depth: number;
 }
 
+interface CrawlJobData {
+  jobId: string;
+  url: string;
+  maxDepth: number;
+  maxPages: number;
+  includePatterns: string[];
+  excludePatterns: string[];
+  webhookUrl?: string;
+  engine?: 'fetch' | 'browser' | 'auto';
+}
+
+interface MonitorJobData {
+  monitorId: string;
+}
+
 async function fetchSitemapText(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -200,7 +203,9 @@ async function fetchSitemapText(url: string): Promise<string | null> {
 }
 
 function extractLocs(xml: string): string[] {
-  return [...xml.matchAll(/<loc>\s*(https?:\/\/[^<]+?)\s*<\/loc>/gi)].map(([, u]) => u.trim());
+  return [...xml.matchAll(/<loc>\s*(https?:\/\/[^<]+?)\s*<\/loc>/gi)].map(
+    ([, u]) => u.trim(),
+  );
 }
 
 async function discoverFromSitemap(
@@ -210,7 +215,9 @@ async function discoverFromSitemap(
   exclude: string[],
   robots: ReturnType<typeof robotsParser>,
 ): Promise<string[] | null> {
-  const rootText = await fetchSitemapText(new URL('/sitemap.xml', siteUrl).toString());
+  const rootText = await fetchSitemapText(
+    new URL('/sitemap.xml', siteUrl).toString(),
+  );
   if (!rootText) return null;
 
   const pageUrls: string[] = [];
@@ -218,7 +225,9 @@ async function discoverFromSitemap(
 
   if (isSitemapIndex) {
     // Root is a sitemap index — fetch each child sitemap and collect page URLs from them
-    const childSitemapUrls = extractLocs(rootText).filter((u) => u.endsWith('.xml'));
+    const childSitemapUrls = extractLocs(rootText).filter((u) =>
+      u.endsWith('.xml'),
+    );
     for (const childUrl of childSitemapUrls) {
       const childText = await fetchSitemapText(childUrl);
       if (!childText) continue;
@@ -256,8 +265,21 @@ async function runCrawl(opts: {
   excludePatterns: string[];
   monitorId?: string;
   engine?: 'fetch' | 'browser' | 'auto';
-}): Promise<{ pagesScraped: number; pagesFailed: number; changedPages?: Array<{ url: string; diff: string }> }> {
-  const { jobId, url, maxDepth, maxPages, includePatterns, excludePatterns, monitorId, engine = 'auto' } = opts;
+}): Promise<{
+  pagesScraped: number;
+  pagesFailed: number;
+  changedPages?: Array<{ url: string; diff: string }>;
+}> {
+  const {
+    jobId,
+    url,
+    maxDepth,
+    maxPages,
+    includePatterns,
+    excludePatterns,
+    monitorId,
+    engine = 'auto',
+  } = opts;
 
   const frontierKey = `crawl:${jobId}:frontier`;
   const visitedKey = `crawl:${jobId}:visited`;
@@ -266,9 +288,15 @@ async function runCrawl(opts: {
   const robots = await fetchRobots(url);
 
   // Load previous monitor page hashes if this is a monitor run
-  let monitorPageCache: Map<string, { etag: string | null; lastModified: string | null; hash: string | null }> = new Map();
+  const monitorPageCache: Map<
+    string,
+    { etag: string | null; lastModified: string | null; hash: string | null }
+  > = new Map();
   if (monitorId) {
-    const existing = await db.select().from(monitor_pages).where(eq(monitor_pages.monitor_id, monitorId));
+    const existing = await db
+      .select()
+      .from(monitor_pages)
+      .where(eq(monitor_pages.monitor_id, monitorId));
     for (const mp of existing) {
       monitorPageCache.set(mp.url, {
         etag: mp.last_etag,
@@ -279,23 +307,41 @@ async function runCrawl(opts: {
   }
 
   // Discover URLs via sitemap or root
-  const sitemapUrls = await discoverFromSitemap(url, maxPages * 3, includePatterns, excludePatterns, robots);
+  const sitemapUrls = await discoverFromSitemap(
+    url,
+    maxPages * 3,
+    includePatterns,
+    excludePatterns,
+    robots,
+  );
   let usesSitemap = false;
 
   if (sitemapUrls) {
     usesSitemap = true;
     const capped = sitemapUrls.slice(0, maxPages);
     if (capped.length > 0) {
-      await redis.rpush(frontierKey, ...capped.map((u) => JSON.stringify({ url: u, depth: 0 })));
+      await redis.rpush(
+        frontierKey,
+        ...capped.map((u) => JSON.stringify({ url: u, depth: 0 })),
+      );
       for (const u of capped) await redis.sadd(visitedKey, u);
     }
-    await db.update(jobs).set({ pages_discovered: capped.length }).where(eq(jobs.id, jobId));
+    await db
+      .update(jobs)
+      .set({ pages_discovered: capped.length })
+      .where(eq(jobs.id, jobId));
   } else {
     const normalized = normalizeUrl(url, url);
     if (normalized) {
-      await redis.rpush(frontierKey, JSON.stringify({ url: normalized, depth: 0 }));
+      await redis.rpush(
+        frontierKey,
+        JSON.stringify({ url: normalized, depth: 0 }),
+      );
       await redis.sadd(visitedKey, normalized);
-      await db.update(jobs).set({ pages_discovered: 1 }).where(eq(jobs.id, jobId));
+      await db
+        .update(jobs)
+        .set({ pages_discovered: 1 })
+        .where(eq(jobs.id, jobId));
     }
   }
 
@@ -309,7 +355,7 @@ async function runCrawl(opts: {
     const raw = await redis.lpop(frontierKey);
     if (!raw) break;
 
-    const item: FrontierItem = JSON.parse(raw);
+    const item = JSON.parse(raw) as FrontierItem;
 
     // Skip if domain is in backoff window
     const domain = new URL(item.url).hostname;
@@ -337,25 +383,46 @@ async function runCrawl(opts: {
       // Force browser for all pages
       try {
         const b = await browserScrape(item.url);
-        result = { status: 'scraped', markdown: b.markdown, title: b.title, links: b.links };
+        result = {
+          status: 'scraped',
+          markdown: b.markdown,
+          title: b.title,
+          links: b.links,
+        };
         usedEngine = 'browser';
       } catch (err: unknown) {
-        result = { status: 'error', error: err instanceof Error ? err.message : String(err) };
+        result = {
+          status: 'error',
+          error: errorMessage(err),
+        };
       }
     } else {
-      result = await fetchPage(item.url, cached ? { etag: cached.etag, lastModified: cached.lastModified } : undefined);
+      result = await fetchPage(
+        item.url,
+        cached
+          ? { etag: cached.etag, lastModified: cached.lastModified }
+          : undefined,
+      );
 
       // Auto: retry with browser if blocked or content is suspiciously thin
       if (
         engine === 'auto' &&
         process.env.BROWSER_WS_ENDPOINT &&
-        (result.status === 'blocked' || (result.status === 'scraped' && (result.markdown?.length ?? 0) < 150))
+        (result.status === 'blocked' ||
+          (result.status === 'scraped' && (result.markdown?.length ?? 0) < 150))
       ) {
         try {
           const b = await browserScrape(item.url);
-          result = { status: 'scraped', markdown: b.markdown, title: b.title, links: b.links };
+          result = {
+            status: 'scraped',
+            markdown: b.markdown,
+            title: b.title,
+            links: b.links,
+          };
           usedEngine = 'browser';
-        } catch { /* browser also failed — keep original fetch result */ }
+        } catch {
+          /* browser also failed — keep original fetch result */
+        }
       }
     }
 
@@ -378,11 +445,28 @@ async function runCrawl(opts: {
 
       // Monitor diff logic
       if (monitorId && result.markdown !== undefined) {
-        const newHash = createHash('sha256').update(result.markdown).digest('hex');
+        const newHash = createHash('sha256')
+          .update(result.markdown)
+          .digest('hex');
         const prev = monitorPageCache.get(item.url);
 
         if (prev && prev.hash && prev.hash !== newHash) {
-          const diffText = diffLines(prev.hash === null ? '' : (await db.select({ last_markdown: monitor_pages.last_markdown }).from(monitor_pages).where(and(eq(monitor_pages.monitor_id, monitorId), eq(monitor_pages.url, item.url))))[0]?.last_markdown ?? '', result.markdown ?? '')
+          const diffText = diffLines(
+            prev.hash === null
+              ? ''
+              : ((
+                  await db
+                    .select({ last_markdown: monitor_pages.last_markdown })
+                    .from(monitor_pages)
+                    .where(
+                      and(
+                        eq(monitor_pages.monitor_id, monitorId),
+                        eq(monitor_pages.url, item.url),
+                      ),
+                    )
+                )[0]?.last_markdown ?? ''),
+            result.markdown ?? '',
+          )
             .filter((c) => c.added || c.removed)
             .map((c) => (c.added ? `+${c.value}` : `-${c.value}`))
             .join('');
@@ -414,22 +498,37 @@ async function runCrawl(opts: {
 
       // Link extraction (only in link-following mode, within depth bounds)
       if (!usesSitemap && result.links && item.depth < maxDepth) {
-        let discovered = parseInt((await redis.scard(visitedKey)).toString(), 10);
+        let discovered = parseInt(
+          (await redis.scard(visitedKey)).toString(),
+          10,
+        );
         for (const href of result.links) {
           if (discovered >= maxPages * 3) break;
           const normalized = normalizeUrl(href, item.url);
           if (!normalized) continue;
           if (!isSameDomain(normalized, url)) continue;
           if (!robots.isAllowed(normalized, USER_AGENT)) continue;
-          if (!isAllowedByPatterns(normalized, includePatterns, excludePatterns)) continue;
+          if (
+            !isAllowedByPatterns(normalized, includePatterns, excludePatterns)
+          )
+            continue;
           const alreadySeen = await redis.sismember(visitedKey, normalized);
           if (alreadySeen) continue;
           await redis.sadd(visitedKey, normalized);
-          await redis.rpush(frontierKey, JSON.stringify({ url: normalized, depth: item.depth + 1 }));
+          await redis.rpush(
+            frontierKey,
+            JSON.stringify({ url: normalized, depth: item.depth + 1 }),
+          );
           discovered++;
         }
-        const newTotal = parseInt((await redis.scard(visitedKey)).toString(), 10);
-        await db.update(jobs).set({ pages_discovered: newTotal }).where(eq(jobs.id, jobId));
+        const newTotal = parseInt(
+          (await redis.scard(visitedKey)).toString(),
+          10,
+        );
+        await db
+          .update(jobs)
+          .set({ pages_discovered: newTotal })
+          .where(eq(jobs.id, jobId));
       }
     } else if (result.unchanged) {
       // 304 — mark page as scraped but skip content update
@@ -465,7 +564,11 @@ async function runCrawl(opts: {
     // Heartbeat
     await db
       .update(jobs)
-      .set({ pages_scraped: pagesScraped, pages_failed: pagesFailed, last_heartbeat_at: new Date() })
+      .set({
+        pages_scraped: pagesScraped,
+        pages_failed: pagesFailed,
+        last_heartbeat_at: new Date(),
+      })
       .where(eq(jobs.id, jobId));
   }
 
@@ -474,10 +577,19 @@ async function runCrawl(opts: {
 }
 
 // ── BullMQ Workers ────────────────────────────────────────────────────────────
-const crawlWorker = new Worker(
+const crawlWorker = new Worker<CrawlJobData>(
   'crawl',
   async (job) => {
-    const { jobId, url, maxDepth, maxPages, includePatterns, excludePatterns, webhookUrl, engine } = job.data;
+    const {
+      jobId,
+      url,
+      maxDepth,
+      maxPages,
+      includePatterns,
+      excludePatterns,
+      webhookUrl,
+      engine,
+    } = job.data;
 
     await db
       .update(jobs)
@@ -501,16 +613,19 @@ const crawlWorker = new Worker(
       }));
     } catch (err: unknown) {
       status = 'failed';
-      error = err instanceof Error ? err.message : String(err);
+      error = errorMessage(err);
     }
 
-    await db.update(jobs).set({
-      status,
-      pages_scraped: pagesScraped,
-      pages_failed: pagesFailed,
-      completed_at: new Date(),
-      error: error ?? null,
-    }).where(eq(jobs.id, jobId));
+    await db
+      .update(jobs)
+      .set({
+        status,
+        pages_scraped: pagesScraped,
+        pages_failed: pagesFailed,
+        completed_at: new Date(),
+        error: error ?? null,
+      })
+      .where(eq(jobs.id, jobId));
 
     if (webhookUrl) {
       const payload = {
@@ -525,18 +640,23 @@ const crawlWorker = new Worker(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10_000),
-      }).catch(() => { /* best-effort */ });
+      }).catch(() => {
+        /* best-effort */
+      });
     }
   },
   { connection: bullConnection },
 );
 
-const monitorWorker = new Worker(
+const monitorWorker = new Worker<MonitorJobData>(
   'monitor',
   async (job) => {
     const { monitorId } = job.data;
 
-    const [monitor] = await db.select().from(monitors).where(eq(monitors.id, monitorId));
+    const [monitor] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitorId));
     if (!monitor || monitor.status !== 'active') return;
 
     // Create a synthetic job record for this monitor run
@@ -568,17 +688,26 @@ const monitorWorker = new Worker(
         monitorId,
       }));
 
-      await db.update(jobs).set({ status: 'completed', completed_at: new Date() }).where(eq(jobs.id, jobId));
+      await db
+        .update(jobs)
+        .set({ status: 'completed', completed_at: new Date() })
+        .where(eq(jobs.id, jobId));
     } catch (err) {
-      await db.update(jobs).set({ status: 'failed', error: String(err), completed_at: new Date() }).where(eq(jobs.id, jobId));
+      await db
+        .update(jobs)
+        .set({ status: 'failed', error: String(err), completed_at: new Date() })
+        .where(eq(jobs.id, jobId));
     }
 
-    const [check] = await db.insert(monitor_checks).values({
-      monitor_id: monitorId,
-      job_id: jobId,
-      pages_checked: pagesScraped,
-      pages_changed: changedPages.length,
-    }).returning();
+    const [check] = await db
+      .insert(monitor_checks)
+      .values({
+        monitor_id: monitorId,
+        job_id: jobId,
+        pages_checked: pagesScraped,
+        pages_changed: changedPages.length,
+      })
+      .returning();
 
     if (changedPages.length > 0 && check) {
       await db.insert(monitor_changes).values(
@@ -591,11 +720,19 @@ const monitorWorker = new Worker(
       );
     }
 
-    await db.update(monitors).set({ last_checked_at: new Date(), last_job_id: jobId }).where(eq(monitors.id, monitorId));
+    await db
+      .update(monitors)
+      .set({ last_checked_at: new Date(), last_job_id: jobId })
+      .where(eq(monitors.id, monitorId));
 
     if (changedPages.length > 0) {
       // AI judge: if a goal is set, filter diffs through LLM before firing webhook
-      type JudgedChange = { url: string; diff: string; relevant?: boolean; reason?: string };
+      type JudgedChange = {
+        url: string;
+        diff: string;
+        relevant?: boolean;
+        reason?: string;
+      };
       let relevantChanges: JudgedChange[] = changedPages;
 
       if (monitor.goal) {
@@ -615,9 +752,16 @@ or
 
           try {
             const raw = await llmComplete(judgePrompt);
-            const verdict = tryParseJson(raw) as { relevant?: boolean; reason?: string } | null;
+            const verdict = tryParseJson(raw) as {
+              relevant?: boolean;
+              reason?: string;
+            } | null;
             if (verdict?.relevant) {
-              relevantChanges.push({ ...change, relevant: true, reason: verdict.reason });
+              relevantChanges.push({
+                ...change,
+                relevant: true,
+                reason: verdict.reason,
+              });
             }
           } catch {
             // Judge failed for this diff — include it to avoid silent drops
@@ -636,7 +780,9 @@ or
           changes: relevantChanges.map((c) => ({
             url: c.url,
             diff: c.diff,
-            ...(monitor.goal ? { relevant: c.relevant ?? true, reason: c.reason } : {}),
+            ...(monitor.goal
+              ? { relevant: c.relevant ?? true, reason: c.reason }
+              : {}),
           })),
         };
         await fetch(monitor.webhook_url, {
@@ -644,7 +790,9 @@ or
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(10_000),
-        }).catch(() => { /* best-effort */ });
+        }).catch(() => {
+          /* best-effort */
+        });
       }
     }
   },
@@ -659,7 +807,12 @@ const maintenanceWorker = new Worker(
       const stale = await db
         .select({ id: jobs.id })
         .from(jobs)
-        .where(and(eq(jobs.status, 'running'), lt(jobs.last_heartbeat_at, staleThreshold)));
+        .where(
+          and(
+            eq(jobs.status, 'running'),
+            lt(jobs.last_heartbeat_at, staleThreshold),
+          ),
+        );
 
       for (const { id } of stale) {
         const frontierKey = `crawl:${id}:frontier`;
@@ -668,16 +821,21 @@ const maintenanceWorker = new Worker(
           await crawlQueue.addBulk(
             remaining.map((item) => ({
               name: 'crawl',
-              data: { jobId: id, ...JSON.parse(item) },
+              data: { jobId: id, ...(JSON.parse(item) as FrontierItem) },
             })),
           );
         }
-        await db.update(jobs).set({ last_heartbeat_at: new Date() }).where(eq(jobs.id, id));
+        await db
+          .update(jobs)
+          .set({ last_heartbeat_at: new Date() })
+          .where(eq(jobs.id, id));
       }
     }
 
     if (job.name === 'log-retention') {
-      const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+      const cutoff = new Date(
+        Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      );
       await db.delete(logs).where(lt(logs.created_at, cutoff));
     }
   },
@@ -693,19 +851,34 @@ monitorWorker.on('failed', (job, err) => {
   console.error(`[monitor] job ${job?.id} failed:`, err.message);
 });
 
+maintenanceWorker.on('failed', (job, err) => {
+  console.error(`[maintenance] job ${job?.id} failed:`, err.message);
+});
+
 // ── Schedule maintenance jobs on startup ─────────────────────────────────────
 async function scheduleMaintenanceJobs() {
-  await maintenanceQueue.add('check-orphans', {}, {
-    repeat: { every: 60_000 },
-    jobId: 'orphan-check',
-  });
+  await maintenanceQueue.add(
+    'check-orphans',
+    {},
+    {
+      repeat: { every: 60_000 },
+      jobId: 'orphan-check',
+    },
+  );
 
-  await maintenanceQueue.add('log-retention', {}, {
-    repeat: { pattern: '0 3 * * *' },
-    jobId: 'log-retention',
-  });
+  await maintenanceQueue.add(
+    'log-retention',
+    {},
+    {
+      repeat: { pattern: '0 3 * * *' },
+      jobId: 'log-retention',
+    },
+  );
 
   console.log('[worker] fetch worker started');
 }
 
-scheduleMaintenanceJobs().catch((err) => { console.error('[worker] startup error:', err); process.exit(1); });
+scheduleMaintenanceJobs().catch((err) => {
+  console.error('[worker] startup error:', err);
+  process.exit(1);
+});

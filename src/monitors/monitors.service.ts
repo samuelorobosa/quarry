@@ -48,7 +48,10 @@ export class MonitorsService {
   }
 
   async getMonitor(id: string) {
-    const [monitor] = await db.select().from(monitors).where(eq(monitors.id, id));
+    const [monitor] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, id));
     if (!monitor) throw new NotFoundException(`Monitor ${id} not found`);
 
     return {
@@ -64,39 +67,67 @@ export class MonitorsService {
   }
 
   async pauseMonitor(id: string) {
-    const [monitor] = await db.select().from(monitors).where(eq(monitors.id, id));
+    const [monitor] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, id));
     if (!monitor) throw new NotFoundException(`Monitor ${id} not found`);
 
     if (monitor.repeat_job_key) {
-      await monitorQueue.removeRepeatableByKey(monitor.repeat_job_key).catch(() => {});
+      await monitorQueue
+        .removeRepeatableByKey(monitor.repeat_job_key)
+        .catch(() => {});
     }
 
-    await db.update(monitors).set({ status: 'paused' }).where(eq(monitors.id, id));
+    await db
+      .update(monitors)
+      .set({ status: 'paused' })
+      .where(eq(monitors.id, id));
     return { 'monitor-id': id, status: 'paused' };
   }
 
   async resumeMonitor(id: string) {
-    const [monitor] = await db.select().from(monitors).where(eq(monitors.id, id));
+    const [monitor] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, id));
     if (!monitor) throw new NotFoundException(`Monitor ${id} not found`);
 
     const cron = FREQUENCY_CRONS[monitor.frequency] ?? FREQUENCY_CRONS.daily;
     const repeatJobKey = await monitorQueue
-      .add('monitor-run', { monitorId: id }, { repeat: { pattern: cron }, jobId: `monitor:${id}` })
+      .add(
+        'monitor-run',
+        { monitorId: id },
+        { repeat: { pattern: cron }, jobId: `monitor:${id}` },
+      )
       .then((j) => j.repeatJobKey ?? null);
 
-    await db.update(monitors).set({ status: 'active', repeat_job_key: repeatJobKey }).where(eq(monitors.id, id));
+    await db
+      .update(monitors)
+      .set({ status: 'active', repeat_job_key: repeatJobKey })
+      .where(eq(monitors.id, id));
     return { 'monitor-id': id, status: 'active' };
   }
 
   async deleteMonitor(id: string) {
-    const [monitor] = await db.select().from(monitors).where(eq(monitors.id, id));
+    const [monitor] = await db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, id));
     if (!monitor) throw new NotFoundException(`Monitor ${id} not found`);
 
     if (monitor.repeat_job_key) {
-      await monitorQueue.removeRepeatableByKey(monitor.repeat_job_key).catch(() => { /* already removed */ });
+      await monitorQueue
+        .removeRepeatableByKey(monitor.repeat_job_key)
+        .catch(() => {
+          /* already removed */
+        });
     }
 
-    await db.update(monitors).set({ status: 'deleted' }).where(eq(monitors.id, id));
+    await db
+      .update(monitors)
+      .set({ status: 'deleted' })
+      .where(eq(monitors.id, id));
     return { 'monitor-id': id, status: 'deleted' };
   }
 }

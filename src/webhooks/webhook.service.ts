@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { errorMessage } from '../common/error-message.js';
 
 @Injectable()
 export class WebhookService {
@@ -16,7 +17,7 @@ export class WebhookService {
         this.logger.warn(`Webhook to ${url} returned ${res.status}`);
       }
     } catch (err: unknown) {
-      this.logger.error(`Webhook to ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`Webhook to ${url} failed: ${errorMessage(err)}`);
     }
   }
 }

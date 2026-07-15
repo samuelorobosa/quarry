@@ -1,7 +1,24 @@
-import { Controller, Get, Header, Param, Post, Query, Redirect } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  Param,
+  Post,
+  Query,
+  Redirect,
+} from '@nestjs/common';
 import { MonitorsService } from '../monitors/monitors.service.js';
 import { DashboardService } from './dashboard.service.js';
-import { configPage, jobDetailPage, jobsPage, layout, monitorsPage, overviewPage, scrapesPage, workersPage } from './templates.js';
+import {
+  configPage,
+  jobDetailPage,
+  jobsPage,
+  layout,
+  monitorsPage,
+  overviewPage,
+  scrapesPage,
+  workersPage,
+} from './templates.js';
 
 @Controller('dashboard')
 export class DashboardController {
@@ -30,20 +47,30 @@ export class DashboardController {
     ]);
     const hasRunning = jobRows.some((j) => j.status === 'running');
     const head = hasRunning ? '<meta http-equiv="refresh" content="5">' : '';
-    return this.shell('overview', overviewPage(stats, recentScrapes.slice(0, 10), jobRows), head);
+    return this.shell(
+      'overview',
+      overviewPage(stats, recentScrapes.slice(0, 10), jobRows),
+      head,
+    );
   }
 
   // ── Scrapes ─────────────────────────────────────────────────────────────────
   @Get('scrapes')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  async scrapes(@Query('source') source?: string, @Query('engine') engine?: string) {
+  async scrapes(
+    @Query('source') source?: string,
+    @Query('engine') engine?: string,
+  ) {
     const rows = await this.dashboardService.listScrapes();
     const filtered = rows.filter((r) => {
       if (source && source !== 'all' && r.source !== source) return false;
       if (engine && engine !== 'all' && r.engine !== engine) return false;
       return true;
     });
-    return this.shell('scrapes', scrapesPage(filtered, source ?? 'all', engine ?? 'all'));
+    return this.shell(
+      'scrapes',
+      scrapesPage(filtered, source ?? 'all', engine ?? 'all'),
+    );
   }
 
   // ── Jobs ────────────────────────────────────────────────────────────────────
@@ -53,14 +80,18 @@ export class DashboardController {
     const rows = await this.dashboardService.listJobs(status);
     const hasRunning = rows.some((j) => j.status === 'running');
     const head = hasRunning ? '<meta http-equiv="refresh" content="10">' : '';
-    return this.shell('jobs', jobsPage(rows, status, hasRunning), head);
+    return this.shell('jobs', jobsPage(rows, status), head);
   }
 
   @Get('jobs/:id')
   @Header('Content-Type', 'text/html; charset=utf-8')
   async jobDetail(@Param('id') id: string) {
     const result = await this.dashboardService.getJob(id);
-    if (!result) return this.shell('jobs', '<main><p style="color:var(--muted);padding:32px">Job not found.</p></main>');
+    if (!result)
+      return this.shell(
+        'jobs',
+        '<main><p style="color:var(--muted);padding:32px">Job not found.</p></main>',
+      );
 
     const job = {
       'job-id': result.job.id,
@@ -72,7 +103,10 @@ export class DashboardController {
       error: result.job.error,
     };
 
-    const head = result.job.status === 'running' ? '<meta http-equiv="refresh" content="3">' : '';
+    const head =
+      result.job.status === 'running'
+        ? '<meta http-equiv="refresh" content="3">'
+        : '';
     return this.shell('jobs', jobDetailPage(job, result.pages), head);
   }
 

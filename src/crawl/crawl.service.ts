@@ -31,16 +31,20 @@ export class CrawlService {
       webhook_url: webhookUrl,
     });
 
-    await crawlQueue.add('crawl', {
-      jobId,
-      url: dto.url,
-      maxDepth,
-      maxPages,
-      includePatterns,
-      excludePatterns,
-      webhookUrl,
-      engine,
-    }, { jobId });
+    await crawlQueue.add(
+      'crawl',
+      {
+        jobId,
+        url: dto.url,
+        maxDepth,
+        maxPages,
+        includePatterns,
+        excludePatterns,
+        webhookUrl,
+        engine,
+      },
+      { jobId },
+    );
 
     return { 'job-id': jobId, status: 'queued' };
   }

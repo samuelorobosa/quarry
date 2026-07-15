@@ -5,7 +5,11 @@ import { tryParseJson } from '../llm/llm-complete.js';
 
 const MAX_MARKDOWN_CHARS = 100_000;
 
-function buildExtractionPrompt(markdown: string, schema: Record<string, string>, truncated: boolean): string {
+function buildExtractionPrompt(
+  markdown: string,
+  schema: Record<string, string>,
+  truncated: boolean,
+): string {
   return `You are a structured data extractor. Extract the requested fields from the webpage content below and return them as a JSON object.
 
 Schema (field name → type):
@@ -31,10 +35,16 @@ export class ExtractService {
   ) {}
 
   async extract(url: string, schema: Record<string, string>) {
-    const { markdown } = await this.scrapeService.scrape(url, 'auto', 'extract');
+    const { markdown } = await this.scrapeService.scrape(
+      url,
+      'auto',
+      'extract',
+    );
 
     const truncated = markdown.length > MAX_MARKDOWN_CHARS;
-    const content = truncated ? markdown.slice(0, MAX_MARKDOWN_CHARS) : markdown;
+    const content = truncated
+      ? markdown.slice(0, MAX_MARKDOWN_CHARS)
+      : markdown;
 
     const prompt = buildExtractionPrompt(content, schema, truncated);
     let raw = await this.llmService.complete(prompt);

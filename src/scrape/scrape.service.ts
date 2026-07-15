@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
+import { errorMessage } from '../common/error-message.js';
 import { db } from '../db/index.js';
 import { scrape_requests } from '../db/schema.js';
 import { browserScrape } from './browser-scrape.js';
@@ -32,7 +33,10 @@ export class ScrapeService {
     try {
       const result = await this.run(url, engine);
       void this.log({
-        url, source, engine: result.engine, status: 'ok',
+        url,
+        source,
+        engine: result.engine,
+        status: 'ok',
         duration_ms: Date.now() - t0,
         markdown_length: result.markdown.length,
         title: result.title,
@@ -40,27 +44,37 @@ export class ScrapeService {
       return result;
     } catch (err) {
       void this.log({
-        url, source,
+        url,
+        source,
         engine: engine === 'auto' ? undefined : engine,
         status: 'error',
         duration_ms: Date.now() - t0,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       });
       throw err;
     }
   }
 
-  private async run(url: string, engine: 'fetch' | 'browser' | 'auto'): Promise<ScrapeResult> {
+  private async run(
+    url: string,
+    engine: 'fetch' | 'browser' | 'auto',
+  ): Promise<ScrapeResult> {
     if (engine === 'browser') {
       return this.scrapeWithBrowser(url);
     }
 
     const fetched = await this.scrapeWithFetch(url);
 
-    if (engine === 'auto' && fetched.markdown.length < BROWSER_THRESHOLD && process.env.BROWSER_WS_ENDPOINT) {
+    if (
+      engine === 'auto' &&
+      fetched.markdown.length < BROWSER_THRESHOLD &&
+      process.env.BROWSER_WS_ENDPOINT
+    ) {
       try {
         return await this.scrapeWithBrowser(url);
-      } catch { /* lightpanda not running — return fetch result */ }
+      } catch {
+        /* lightpanda not running — return fetch result */
+      }
     }
 
     return fetched;
@@ -74,7 +88,7 @@ export class ScrapeService {
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       throw new BadRequestException(`Failed to fetch ${url}: ${message}`);
     }
 
@@ -98,10 +112,18 @@ export class ScrapeService {
   private async scrapeWithBrowser(url: string): Promise<ScrapeResult> {
     try {
       const { title, markdown } = await browserScrape(url);
-      return { url, title, markdown, engine: 'browser', 'scraped-at': new Date().toISOString() };
+      return {
+        url,
+        title,
+        markdown,
+        engine: 'browser',
+        'scraped-at': new Date().toISOString(),
+      };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new BadRequestException(`Browser scrape failed for ${url}: ${message}`);
+      const message = errorMessage(err);
+      throw new BadRequestException(
+        `Browser scrape failed for ${url}: ${message}`,
+      );
     }
   }
 
@@ -115,6 +137,9 @@ export class ScrapeService {
     title?: string;
     error?: string;
   }) {
-    await db.insert(scrape_requests).values(data).catch(() => {});
+    await db
+      .insert(scrape_requests)
+      .values(data)
+      .catch(() => {});
   }
 }

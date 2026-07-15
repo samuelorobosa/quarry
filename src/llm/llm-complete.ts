@@ -34,7 +34,7 @@ export function tryParseJson(raw: string): Record<string, unknown> | null {
     .replace(/\s*```\s*$/, '')
     .trim();
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
     return null;
   }

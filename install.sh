@@ -5,6 +5,13 @@ INSTALL_DIR="/opt/quarry"
 REPO_URL="https://github.com/samuelorobosa/quarry"
 COMPOSE_CMD="docker compose"
 
+ENABLE_BROWSER=false
+for arg in "$@"; do
+  case "$arg" in
+    --enable-browser) ENABLE_BROWSER=true ;;
+  esac
+done
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -68,7 +75,11 @@ $COMPOSE_CMD $COMPOSE_ARGS build --quiet
 
 # ── Step 7: Start services ────────────────────────────────────────────────────
 info "Step 7/9 — Starting services"
-$COMPOSE_CMD $COMPOSE_ARGS --profile browser up -d
+if [[ "$ENABLE_BROWSER" == "true" ]]; then
+  $COMPOSE_CMD $COMPOSE_ARGS --profile browser up -d
+else
+  $COMPOSE_CMD $COMPOSE_ARGS up -d
+fi
 
 # ── Step 8: Wait for health checks ───────────────────────────────────────────
 info "Step 8/9 — Waiting for services to be healthy"
@@ -101,6 +112,11 @@ echo ""
 info "✓ Quarry is running at http://localhost:${PORT}"
 info "  Dashboard : http://localhost:${PORT}/dashboard"
 info "  Metrics   : http://localhost:${PORT}/metrics"
+if [[ "$ENABLE_BROWSER" == "true" ]]; then
+  info "  Browser worker: enabled (Lightpanda + Chromium fallback)"
+else
+  info "  Browser worker: disabled — re-run with --enable-browser to turn it on"
+fi
 echo ""
 warn "Next: add your LLM_API_KEY to ${INSTALL_DIR}/.env and restart:"
 warn "  $COMPOSE_CMD $COMPOSE_ARGS restart api worker-fetch"

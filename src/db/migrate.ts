@@ -7,7 +7,9 @@ config();
 
 async function main() {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/quarry',
+    connectionString:
+      process.env.DATABASE_URL ??
+      'postgresql://postgres:postgres@localhost:5432/quarry',
   });
 
   const migrationsDir = join(process.cwd(), 'migrations');
@@ -25,4 +27,7 @@ async function main() {
   console.log('All migrations complete');
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
