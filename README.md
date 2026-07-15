@@ -1,8 +1,11 @@
 # Quarry
 
+[![CI](https://github.com/samuelorobosa/quarry/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelorobosa/quarry/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+
 Self-hosted web scraper and crawler built for AI agent context. Scrape pages to clean markdown, crawl entire sites, monitor for changes, and extract structured data. Runs on your own infrastructure with zero third-party dependency.
 
-Licensed AGPL-3.0.
+Licensed AGPL-3.0 — see [`LICENSE`](LICENSE).
 
 ---
 
@@ -336,6 +339,15 @@ pnpm start:worker      # fetch + monitor worker
 
 ---
 
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup and PR
+guidelines, and [`SECURITY.md`](SECURITY.md) if you're reporting a
+vulnerability. This project follows the [Code of
+Conduct](CODE_OF_CONDUCT.md).
+
+---
+
 ## License
 
-AGPL-3.0. Self-hosters can run Quarry freely. Anyone who modifies it and offers it as a network service must release their source under the same license.
+AGPL-3.0. Self-hosters can run Quarry freely. Anyone who modifies it and offers it as a network service must release their source under the same license. See [`LICENSE`](LICENSE) for the full text.
