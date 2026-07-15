@@ -1,0 +1,20 @@
+services:
+  api:
+    build:
+      context: .
+      target: dev
+    entrypoint: ""
+    command: sh -c "pnpm install --frozen-lockfile && pnpm build && pnpm db:migrate && pnpm start:dev"
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  worker-fetch:
+    build:
+      context: .
+      target: dev
+    entrypoint: ""
+    command: sh -c "pnpm install --frozen-lockfile && pnpm build && pnpm start:worker"
+    volumes:
+      - .:/app
+      - /app/node_modules

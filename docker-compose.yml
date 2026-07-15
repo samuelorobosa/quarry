@@ -1,0 +1,103 @@
+services:
+  postgres:
+    container_name: quarry-postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quarry
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - quarry-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    container_name: quarry-redis
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - quarry-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    container_name: quarry-api
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/quarry
+      REDIS_URL: redis://redis:6379
+      BROWSER_WS_ENDPOINT: ws://lightpanda:9222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quarry-net
+
+  worker-fetch:
+    container_name: quarry-worker
+    build: .
+    command: node dist/src/workers/fetch.worker.js
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/quarry
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quarry-net
+
+  # Browser worker — opt in with: docker compose --profile browser up
+  lightpanda:
+    container_name: quarry-lightpanda
+    image: lightpanda/browser:nightly
+    profiles: ["browser"]
+    networks:
+      - quarry-net
+
+  worker-browser:
+    container_name: quarry-worker-browser
+    build: .
+    command: node dist/src/workers/fetch.worker.js
+    profiles: ["browser"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/quarry
+      REDIS_URL: redis://redis:6379
+      BROWSER_WS_ENDPOINT: ws://lightpanda:9222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lightpanda:
+        condition: service_started
+    networks:
+      - quarry-net
+
+
+networks:
+  quarry-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1450"
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,2 @@
+ALTER TABLE job_pages ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
+ALTER TABLE job_pages ADD COLUMN IF NOT EXISTS markdown_length INTEGER;
